@@ -1,47 +1,52 @@
 import os
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from youtube_transcript_api import YouTubeTranscriptApi
 import google.generativeai as genai
-from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# Firefox eklentisinin sunucuya bağlanabilmesi için gerekli izin (CORS)
+# --- Firefox Eklentisi İçin CORS İzinleri ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Her yerden gelen isteğe izin ver
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Vercel Settings -> Environment Variables kısmına ekleyeceğin anahtarı okur
+# Gemini API Yapılandırması
 api_key = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=api_key)
 
+def get_video_id(url):
+    if "v=" in url:
+        return url.split("v=")[1].split("&")[0]
+    elif "be/" in url:
+        return url.split("be/")[1].split("?")[0]
+    return None
+
+@app.get("/")
+def home():
+    return {"message": "BriefingTube Backend Aktif!"}
+
 @app.get("/ozetle")
-def ozet_yap(url: str = Query(..., description="YouTube video URL'si")):
+async def summarize(url: str = Query(...)):
+    video_id = get_video_id(url)
+    if not video_id:
+        raise HTTPException(status_code=400, detail="Geçersiz YouTube linki.")
+
     try:
-        # 1. URL'den Video ID'sini ayıkla
-        if "v=" in url:
-            video_id = url.split("v=")[1].split("&")[0]
-        elif "be/" in url:
-            video_id = url.split("be/")[1].split("?")[0]
-        else:
-            return {"error": "Geçersiz YouTube URL'si."}
+        # Altyazıları çek (Türkçe veya İngilizce)
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['tr', 'en'])
+        text = " ".join([t['text'] for t in transcript])
 
-        # 2. Altyazıları çek (Önce Türkçe, yoksa İngilizce dene)
-        try:
-            transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['tr', 'en'])
-            text = " ".join([t['text'] for t in transcript_list])
-        except Exception:
-            return {"error": "Bu videonun altyazılarına ulaşılamadı."}
-
-        # 3. Gemini ile özetle
+        # Gemini 1.5 Flash ile özetle
         model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"Aşağıdaki video metnini anlamlı ve akıcı bir şekilde, tek bir paragraf olarak özetle:\n\n{text}"
-        response = model.generate_content(prompt)
+        prompt = f"Aşağıdaki YouTube videosu metnini Türkçe olarak detaylıca özetle:\n\n{text}"
         
+        response = model.generate_content(prompt)
         return {"ozet": response.text}
 
     except Exception as e:
-        return {"error": f"Sunucu hatası: {str(e)}"}
+        return {"error": str(e)}
