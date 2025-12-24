@@ -6,10 +6,10 @@ import google.generativeai as genai
 
 app = FastAPI()
 
-# --- Firefox Eklentisi İçin CORS İzinleri ---
+# --- CORS Ayarları ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Her yerden gelen isteğe izin ver
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -28,25 +28,25 @@ def get_video_id(url):
 
 @app.get("/")
 def home():
-    return {"message": "BriefingTube Backend Aktif!"}
+    return {"status": "online", "message": "BriefingTube API Hazır"}
 
 @app.get("/ozetle")
 async def summarize(url: str = Query(...)):
     video_id = get_video_id(url)
     if not video_id:
-        raise HTTPException(status_code=400, detail="Geçersiz YouTube linki.")
+        raise HTTPException(status_code=400, detail="Geçersiz YouTube URL'si")
 
     try:
-        # Altyazıları çek (Türkçe veya İngilizce)
+        # Altyazıları getir (Türkçe öncelikli, sonra İngilizce)
         transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['tr', 'en'])
         text = " ".join([t['text'] for t in transcript])
 
-        # Gemini 1.5 Flash ile özetle
+        # Video çok kısaysa Gemini'ye özel talimat ver
         model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"Aşağıdaki YouTube videosu metnini Türkçe olarak detaylıca özetle:\n\n{text}"
+        prompt = f"Aşağıdaki YouTube videosu metnini analiz et. Eğer video kısaysa ana fikri net yaz, uzunsa bölümlere ayırarak Türkçe özetle:\n\n{text}"
         
         response = model.generate_content(prompt)
         return {"ozet": response.text}
 
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"Altyazı alınamadı veya video özetlenemedi: {str(e)}"}
