@@ -14,52 +14,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# API anahtarını kontrol et
+# API anahtarını yükle
 api_key = os.getenv("GEMINI_API_KEY")
-if api_key:
-    genai.configure(api_key=api_key)
-
-def get_video_id(url):
-    if "v=" in url:
-        return url.split("v=")[1].split("&")[0]
-    elif "be/" in url:
-        return url.split("be/")[1].split("?")[0]
-    return None
 
 @app.get("/")
 def home():
-    return {"status": "online", "api_key_set": bool(api_key)}
+    return {"status": "online", "api_key_loaded": bool(api_key)}
 
 @app.get("/ozetle")
 async def summarize(url: str = Query(...)):
     if not api_key:
-        return {"error": "API Anahtarı Vercel üzerinde tanımlanmamış!"}
+        return {"error": "API anahtarı bulunamadı. Vercel redeploy edilmelidir."}
 
-    video_id = get_video_id(url)
-    if not video_id:
-        return {"error": "Geçersiz YouTube URL'si"}
-
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    genai.configure(api_key=api_key)
     
     try:
-        # Altyazı çekmeyi dene
-        text = ""
+        # Video ID ayıklama
+        video_id = url.split("v=")[1].split("&")[0] if "v=" in url else url.split("/")[-1]
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
         try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            try:
-                transcript = transcript_list.find_transcript(['tr', 'en'])
-            except:
-                transcript = next(iter(transcript_list))
-            
-            lines = transcript.fetch()
-            text = " ".join([t['text'] for t in lines])
-            prompt = f"Aşağıdaki altyazıları Türkçe olarak özetle:\n\n{text}"
-        except Exception as e:
-            # Altyazı yoksa tahmin moduna geç
-            prompt = f"Bu YouTube videosunda ({url}) altyazı yok. Sadece linke ve başlığa bakarak videonun ne hakkında olduğunu tahmin et ve Türkçe açıkla."
+            # Altyazıları çek
+            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['tr', 'en'])
+            text = " ".join([t['text'] for t in transcript])
+            prompt = f"Aşağıdaki altyazıları Türkçe özetle:\n\n{text}"
+        except:
+            # Altyazı yoksa tahmin et
+            prompt = f"Bu videoda ({url}) altyazı yok. Başlığa ve linke bakarak ne hakkında olduğunu Türkçe tahmin et."
 
         response = model.generate_content(prompt)
         return {"ozet": response.text}
 
     except Exception as e:
-        return {"error": f"AI Analiz sırasında hata oluştu: {str(e)}"}
+        return {"error": f"Sistem hatası: {str(e)}"}
