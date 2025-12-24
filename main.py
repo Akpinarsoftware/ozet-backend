@@ -14,8 +14,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# API anahtarını kontrol et
 api_key = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=api_key)
+if api_key:
+    genai.configure(api_key=api_key)
 
 def get_video_id(url):
     if "v=" in url:
@@ -26,29 +28,38 @@ def get_video_id(url):
 
 @app.get("/")
 def home():
-    return {"message": "BriefingTube Backend Aktif"}
+    return {"status": "online", "api_key_set": bool(api_key)}
 
 @app.get("/ozetle")
 async def summarize(url: str = Query(...)):
+    if not api_key:
+        return {"error": "API Anahtarı Vercel üzerinde tanımlanmamış!"}
+
     video_id = get_video_id(url)
     if not video_id:
-        return {"error": "Geçersiz URL"}
+        return {"error": "Geçersiz YouTube URL'si"}
 
     model = genai.GenerativeModel('gemini-1.5-flash')
     
     try:
-        # Önce altyazı ara
+        # Altyazı çekmeyi dene
+        text = ""
         try:
             transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            transcript = transcript_list.find_transcript(['tr', 'en'])
-            text = " ".join([t['text'] for t in transcript.fetch()])
-            prompt = f"Bu altyazıları özetle: {text}"
-        except:
+            try:
+                transcript = transcript_list.find_transcript(['tr', 'en'])
+            except:
+                transcript = next(iter(transcript_list))
+            
+            lines = transcript.fetch()
+            text = " ".join([t['text'] for t in lines])
+            prompt = f"Aşağıdaki altyazıları Türkçe olarak özetle:\n\n{text}"
+        except Exception as e:
             # Altyazı yoksa tahmin moduna geç
-            prompt = f"Bu YouTube videosunda ({url}) altyazı yok. Başlığa bakarak videonun içeriğini tahmin et ve Türkçe açıkla."
+            prompt = f"Bu YouTube videosunda ({url}) altyazı yok. Sadece linke ve başlığa bakarak videonun ne hakkında olduğunu tahmin et ve Türkçe açıkla."
 
         response = model.generate_content(prompt)
         return {"ozet": response.text}
 
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"AI Analiz sırasında hata oluştu: {str(e)}"}
