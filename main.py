@@ -6,7 +6,6 @@ import google.generativeai as genai
 
 app = FastAPI()
 
-# CORS Ayarları
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,7 +14,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Gemini API Yapılandırması
 api_key = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=api_key)
 
@@ -28,26 +26,26 @@ def get_video_id(url):
 
 @app.get("/")
 def home():
-    return {"status": "online", "message": "BriefingTube AI Aktif"}
+    return {"message": "BriefingTube Backend Aktif"}
 
 @app.get("/ozetle")
 async def summarize(url: str = Query(...)):
     video_id = get_video_id(url)
     if not video_id:
-        raise HTTPException(status_code=400, detail="Geçersiz URL")
+        return {"error": "Geçersiz URL"}
 
     model = genai.GenerativeModel('gemini-1.5-flash')
     
     try:
-        # 1. Adım: Altyazı var mı bak
+        # Önce altyazı ara
         try:
             transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
             transcript = transcript_list.find_transcript(['tr', 'en'])
             text = " ".join([t['text'] for t in transcript.fetch()])
-            prompt = f"Aşağıdaki altyazılara sahip videoyu Türkçe özetle:\n\n{text}"
+            prompt = f"Bu altyazıları özetle: {text}"
         except:
-            # 2. Adım: Altyazı yoksa Gemini'a videoyu "yorumlat"
-            prompt = f"Bu YouTube videosunda ({url}) altyazı yok. Sadece linke ve video başlığına bakarak bu videonun ne hakkında olduğunu (oyun, müzik, eğitim vb.) Türkçe tahmin et ve açıkla."
+            # Altyazı yoksa tahmin moduna geç
+            prompt = f"Bu YouTube videosunda ({url}) altyazı yok. Başlığa bakarak videonun içeriğini tahmin et ve Türkçe açıkla."
 
         response = model.generate_content(prompt)
         return {"ozet": response.text}
